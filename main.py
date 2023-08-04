@@ -4,7 +4,6 @@ import numpy as np
 import cv2
 from PIL import Image
 import pyautogui
-import pygetwindow
 import math
 
 monitor = {'top': 0, 'left': 0, 'width': 640, 'height': 360}
