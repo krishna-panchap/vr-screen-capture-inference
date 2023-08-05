@@ -1,1 +1,124 @@
-whats up
+<html>
+  <head>
+    <title>Yolo</title>
+    <script crossorigin="anonymous" src="src/aframe.min.js"></script>
+    <script src="src/components/persistent-anchors-component.js"></script>
+    <script src="src/components/camera-controls-component.js"></script>
+    <script src="src/components/detected-planes-component.js"></script>
+    <!-- https://github.com/gftruj/aframe-hand-tracking-controls-extras -->
+    <script src="src/components/hand-tracking-controls-extras.js"></script>
+  </head>
+  <body>
+    <a-scene
+      shadow="type: pcfsoft"
+      renderer="colorManagement:true; toneMapping:ACESFilmic;"
+      persistent-anchors="target: #sceneContainer; targetAnchor: #internalAnchor;"
+      webxr="optionalFeatures: anchors; requiredFeatures: plane-detection,local-floor;"
+      detected-planes
+    >
+      <a-assets>
+        <a-asset-item id="roomModel" src="assets/room.glb"></a-asset-item>
+        <a-asset-item id="anchorModel" src="assets/anchor.glb"></a-asset-item>
+      </a-assets>
+
+      <a-entity visible="false" id="anchor">
+        <a-box scale="0.01 0.01 0.01" color="red" visible="false"></a-box>
+        <a-entity position="0 -0.2 -0.1">
+          <a-entity
+            gltf-model="#anchorModel"
+            scale="0.020 0.020 0.020"
+            position="0 0.119 0"
+            rotation="0 0 0"
+          ></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-camera position="0 1.6 0" id="camera">
+        <a-entity id="cameraForward" position="0 0 -10"></a-entity>
+      </a-camera>
+
+      <a-entity
+        id="leftHandControls"
+        oculus-touch-controls="hand: left; model: false;"
+        camera-controls="hand: left;"
+      ></a-entity>
+      <a-entity
+        id="rightHandControls"
+        oculus-touch-controls="hand: right; model: false;"
+        camera-controls="hand: right;"
+      >
+        <a-box visible="false" color="red" scale="0.01 0.01 0.01"></a-box>
+        <a-entity position="0 -0.2 -0.1" id="handAnchor" visible="false">
+          <a-entity
+            gltf-model="#anchorModel"
+            scale="0.020 0.020 0.020"
+            position="0 0.119 0"
+            rotation="0 0 0"
+          ></a-entity>
+        </a-entity>
+      </a-entity>
+
+      <a-entity id="sceneContainer" position="0 1 -3.219">
+        <a-entity id="internalAnchor" position="0 0 0">
+          <a-entity position="0 -0.2 -0.1">
+            <a-entity
+              gltf-model="#anchorModel"
+              scale="0.020 0.020 0.020"
+              position="0 0.119 0"
+              rotation="0 0 0"
+            ></a-entity>
+          </a-entity>
+        </a-entity>
+
+        <a-entity
+          data-toggle-visibility
+          data-color-write="false"
+          gltf-model="#roomModel"
+          position="0 0 0"
+          scale="1 1 1"
+          shadow="receive: true; cast: false;"
+          rotation="0 0 0"
+          id="room"
+        ></a-entity>
+      </a-entity>
+    </a-scene>
+  </body>
+  <script>
+    function setupWebsocketConnection(onMessage, onConnect) {
+      // Create WebSocket connection.
+      let socket;
+
+      const createSocket = () => {
+        socket = window.socket = new WebSocket(
+          `wss://${location.hostname}:8443`
+        );
+
+        socket.addEventListener("open", () => {
+          console.log("connection opened");
+          if (onConnect) {
+            onConnect();
+          }
+        });
+        socket.addEventListener("message", (event) => {
+          console.log("Message from server ", event.data);
+          const message = JSON.parse(event.data);
+          if (onMessage) {
+            onMessage(message);
+          }
+        });
+        socket.addEventListener("close", (event) => {
+          console.log("connection closed");
+          createSocket();
+        });
+      };
+      createSocket();
+
+      const send = (object) => {
+        socket.send(JSON.stringify(object));
+      };
+
+      return send;
+    }
+    window.sendMessage = setupWebsocketConnection();
+  </script>
+</html>

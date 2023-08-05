@@ -5,6 +5,8 @@ import os
 import asyncio
 import websockets
 import threading
+import json
+
 
 from ultralytics import YOLO
 from mss import mss
@@ -33,10 +35,13 @@ ssl_certfile = get_path("sec/certificate.crt")
 ssl_keyfile = get_path("sec/private_key.key")
 
 
-async def websocket_handler(websocket, path):
+async def websocket_handler(websocket):
     async for message in websocket:
-        print(f"Received message: {message}")
-        response = f"Server received: {message}"
+        message_object = json.loads(message)
+        print(f"Received message: {message_object} {type(message_object)}")
+        response_object = {
+            "wow": "lolz"
+        response = json.dumps(response_object)
         await websocket.send(response)
         print(f"Sent response: {response}")
 
