@@ -41,6 +41,7 @@ async def websocket_handler(websocket):
         print(f"Received message: {message_object} {type(message_object)}")
         response_object = {
             "wow": "lolz"
+        }
         response = json.dumps(response_object)
         await websocket.send(response)
         print(f"Sent response: {response}")
