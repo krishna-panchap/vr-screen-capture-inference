@@ -152,7 +152,7 @@ cython_debug/
 #.idea/
 
 *.pt
-
+*.glb
 *.txt
 .DS_Store
-/sec
+sec/
