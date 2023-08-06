@@ -129,7 +129,7 @@ async def setup_yolo():
                                 "conf": box.conf.tolist()[0],
                                 "xywhn": box.xywhn.tolist()[0]
                             }
-                            print(box_message)
+                            # print(box_message)
                             box_messages.append(box_message)
 
                 if len(box_messages) > 0:
