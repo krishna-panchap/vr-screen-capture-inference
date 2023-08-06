@@ -7,6 +7,7 @@
     <script src="src/components/detected-planes-component.js"></script>
     <!-- https://github.com/gftruj/aframe-hand-tracking-controls-extras -->
     <script src="src/components/hand-tracking-controls-extras.js"></script>
+    <script src="src/components/yolo-component.js"></script>
   </head>
   <body>
     <a-scene
@@ -83,42 +84,4 @@
       </a-entity>
     </a-scene>
   </body>
-  <script>
-    function setupWebsocketConnection(onMessage, onConnect) {
-      // Create WebSocket connection.
-      let socket;
-
-      const createSocket = () => {
-        socket = window.socket = new WebSocket(
-          `wss://${location.hostname}:8443`
-        );
-
-        socket.addEventListener("open", () => {
-          console.log("connection opened");
-          if (onConnect) {
-            onConnect();
-          }
-        });
-        socket.addEventListener("message", (event) => {
-          console.log("Message from server ", event.data);
-          const message = JSON.parse(event.data);
-          if (onMessage) {
-            onMessage(message);
-          }
-        });
-        socket.addEventListener("close", (event) => {
-          console.log("connection closed");
-          createSocket();
-        });
-      };
-      createSocket();
-
-      const send = (object) => {
-        socket.send(JSON.stringify(object));
-      };
-
-      return send;
-    }
-    window.sendMessage = setupWebsocketConnection();
-  </script>
 </html>

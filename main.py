@@ -35,16 +35,22 @@ ssl_certfile = get_path("sec/certificate.crt")
 ssl_keyfile = get_path("sec/private_key.key")
 
 
-async def websocket_handler(websocket):
-    async for message in websocket:
-        message_object = json.loads(message)
-        print(f"Received message: {message_object} {type(message_object)}")
-        response_object = {
-            "wow": "lolz"
-        }
-        response = json.dumps(response_object)
-        await websocket.send(response)
-        print(f"Sent response: {response}")
+websocket_clients = set()
+
+
+async def websocket_handler(websocket_client):
+    if websocket_client not in websocket_clients:
+        print("new websocket client")
+        websocket_clients.add(websocket_client)
+    async for message in websocket_client:
+        message_object: dict = json.loads(message)
+        print(f"Received message: {message_object}")
+        message_type = message_object.get("type", "")
+        match message_type:
+            case "connection":
+                break
+            case _:
+                print(f'uncaught message type "{message_type}"')
 
 
 async def start_websocket_server():
@@ -89,7 +95,7 @@ pixel_scalar = 2
 crop_square = True
 
 
-def setup_yolo():
+async def setup_yolo():
     size = pyautogui.size()
     monitor = {
         "top": 0,
@@ -111,26 +117,57 @@ def setup_yolo():
                 screenshot_array = np.array(img)
                 screen = cv2.cvtColor(screenshot_array, cv2.COLOR_RGB2BGR)
                 results = model.track(
-                    screen, stream=True, persist=True, verbose=True, show=True)
+                    screen, stream=True, persist=True, verbose=False, show=True)
+                box_messages = []
                 for result in results:
                     boxes = result.boxes  # Boxes object for bbox outputs
-                    masks = result.masks  # Masks object for segmentation masks outputs
-                    keypoints = result.keypoints  # Keypoints object for pose outputs
-                    probs = result.probs  # Probs object for classification outputs
+                    for box in boxes:
+                        if box.id is not None:
+                            box_message = {
+                                "id": box.id.tolist()[0],
+                                "cls": box.cls.tolist()[0],
+                                "conf": box.conf.tolist()[0],
+                                "xywhn": box.xywhn.tolist()[0]
+                            }
+                            print(box_message)
+                            box_messages.append(box_message)
+
+                if len(box_messages) > 0:
+                    message = {
+                        "type": "results",
+                        "results": box_messages
+                    }
+                    message_json = json.dumps(message)
+
+                    websockets_to_remove = set()
+                    for websocket_client in websocket_clients:
+                        try:
+                            await websocket_client.send(message_json)
+                        except websockets.exceptions.ConnectionClosed:
+                            print("lost websocket client")
+                            websockets_to_remove.add(websocket_client)
+
+                    for websocket_client in websockets_to_remove:
+                        websocket_clients.remove(websocket_client)
         except KeyboardInterrupt:
             pass
 
 
 def main():
+
+    # Start HTTPS server in a new thread
+    https_server_thread = threading.Thread(target=setup_https_server)
+    https_server_thread.start()
+
     # Start WebSocket server in a new thread
     websocket_thread = threading.Thread(target=setup_websocket_server)
     websocket_thread.start()
 
-    # Start HTTPS server in the main thread
-    setup_https_server()
+    asyncio.run(setup_yolo())
 
     # Wait for the WebSocket server thread to finish (which will be never unless stopped manually)
     websocket_thread.join()
+    https_server_thread.join()
 
 
 if __name__ == "__main__":
