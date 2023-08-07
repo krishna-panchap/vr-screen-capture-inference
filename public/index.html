@@ -9,7 +9,39 @@
     <script src="src/components/hand-tracking-controls-extras.js"></script>
     <script src="src/components/yolo-component.js"></script>
   </head>
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    #overlay {
+      position: absolute;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    #overlay .clickable {
+      pointer-events: all;
+    }
+    #overlay .hidden {
+      display: none;
+    }
+    #overlay .result {
+      border: solid 5px;
+      position: absolute;
+    }
+    #overlay .result .label {
+      position: absolute;
+      font-weight: bold;
+      font-family: sans-serif;
+      background-color: white;
+      font-size: large;
+    }
+  </style>
   <body>
+    <div id="overlay"></div>
     <a-scene
       shadow="type: pcfsoft"
       renderer="colorManagement:true; toneMapping:ACESFilmic;"

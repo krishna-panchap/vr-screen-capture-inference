@@ -7,7 +7,6 @@ import websockets
 import threading
 import json
 
-
 from ultralytics import YOLO
 from mss import mss
 import numpy as np
@@ -47,8 +46,6 @@ async def websocket_handler(websocket_client):
         print(f"Received message: {message_object}")
         message_type = message_object.get("type", "")
         match message_type:
-            case "connection":
-                break
             case _:
                 print(f'uncaught message type "{message_type}"')
 
@@ -71,10 +68,15 @@ def setup_websocket_server():
     asyncio.get_event_loop().run_until_complete(start_websocket_server())
 
 
+class quietServer(http.server.SimpleHTTPRequestHandler):
+    def log_message(self, format, *args):
+        pass
+
+
 def setup_https_server():
     # Create a TCP socket server for HTTPS
     httpd = socketserver.TCPServer(
-        (bind_address, port_http), http.server.SimpleHTTPRequestHandler)
+        (bind_address, port_http), quietServer)
 
     # Wrap the HTTPS server with SSL/TLS context
     httpd.socket = ssl.wrap_socket(
@@ -92,7 +94,7 @@ def setup_https_server():
 # yolo settings
 monitor = {'top': 0, 'left': 0, 'width': 640, 'height': 360}
 pixel_scalar = 2
-crop_square = True
+crop_square = False
 
 
 async def setup_yolo():

@@ -3,42 +3,14 @@ AFRAME.registerSystem("yolo", {
     port: { type: "string", default: "8443" },
   },
 
-  setupWebsocketConnection: function (onMessage, onConnect) {
-    // Create WebSocket connection.
-    let socket;
-
-    const createSocket = () => {
-      socket = window.socket = new WebSocket(
-        `wss://${location.hostname}:${this.data.port}`
-      );
-
-      socket.addEventListener("open", () => {
-        console.log("connection opened");
-        this.onWebsocketConnection();
-      });
-      socket.addEventListener("message", (event) => {
-        //console.log("Message from server ", event.data);
-        const message = JSON.parse(event.data);
-        this.onWebsocketMessage(message);
-      });
-      socket.addEventListener("close", (event) => {
-        console.log("connection closed");
-        setTimeout(() => createSocket(), 1000);
-      });
-    };
-    createSocket();
-
-    const send = (object) => {
-      socket.send(JSON.stringify(object));
-    };
-
-    this.sendWebsocketMessage = send;
-  },
-
   init: function () {
     window.yoloSystem = this;
+    this.showResultsInOverlay = !AFRAME.utils.device.isOculusBrowser();
     this.entities = [];
-    this.setupWebsocketConnection();
+
+    this.overlay = document.getElementById("overlay");
+    this.overlayElements = new Set();
+    this.unusedOverlayElements = new Set();
 
     this.classes = {
       0: "person",
@@ -122,13 +94,46 @@ AFRAME.registerSystem("yolo", {
       78: "hair drier",
       79: "toothbrush",
     };
+
+    this.colors = ["red", "blue", "green", "orange", "purple"];
+
+    this.setupWebsocketConnection();
   },
 
-  onWebsocketConnection: function () {
-    //this.sendWebsocketMessage({ type: "connection" });
+  setupWebsocketConnection: function (onMessage, onConnect) {
+    let socket;
+
+    const createSocket = () => {
+      socket = window.socket = new WebSocket(
+        `wss://${location.hostname}:${this.data.port}`
+      );
+
+      socket.addEventListener("open", () => {
+        console.log("connection opened");
+        this.onWebsocketConnection();
+      });
+      socket.addEventListener("message", (event) => {
+        //console.log("Message from server ", event.data);
+        const message = JSON.parse(event.data);
+        this.onWebsocketMessage(message);
+      });
+      socket.addEventListener("close", (event) => {
+        console.log("connection closed");
+        setTimeout(() => createSocket(), 1000);
+      });
+    };
+    createSocket();
+
+    const send = (object) => {
+      socket.send(JSON.stringify(object));
+    };
+
+    this.sendWebsocketMessage = send;
   },
+
+  onWebsocketConnection: function () {},
   onWebsocketMessage: function (message) {
-    console.log(message);
+    //console.log("message", message);
     switch (message.type) {
       case "results":
         this.onResults(message.results);
@@ -139,11 +144,91 @@ AFRAME.registerSystem("yolo", {
     }
   },
 
+  shiftSet: function (set) {
+    for (const value of set) {
+      set.delete(value);
+      return value;
+    }
+  },
+  getOverlayElementById: function (id) {
+    for (const overlayElement of this.overlayElements) {
+      if (overlayElement._id == id) {
+        return overlayElement;
+      }
+    }
+  },
+
+  randomColor: function () {
+    return this.colors[Math.floor(Math.random() * this.colors.length)];
+  },
+
   onResults: function (results) {
+    const windowHeightScalar = window.innerHeight / window.outerHeight;
+    const windowHeightOffset = 1 - windowHeightScalar;
+    console.log("windowHeightOffset", windowHeightOffset);
+    const overlayElementsToRemove = new Set(this.overlayElements);
     results.forEach((result) => {
       const { id, cls, conf, xywhn } = result;
+      const [x, y, width, height] = xywhn;
       const clsString = this.classes[cls];
       console.log(id, clsString, conf, xywhn);
+      if (this.showResultsInOverlay) {
+        let updateStyle = false;
+        let overlayElement = this.getOverlayElementById(id);
+        if (!overlayElement) {
+          overlayElement = this.shiftSet(this.unusedOverlayElements);
+          if (overlayElement) {
+            console.log("recycling", overlayElement);
+            updateStyle = true;
+          }
+        }
+        if (!overlayElement) {
+          updateStyle = true;
+          overlayElement = document.createElement("div");
+          overlayElement.classList.add("result");
+          const label = document.createElement("div");
+          label.classList.add("label");
+          overlayElement.appendChild(label);
+          this.overlay.appendChild(overlayElement);
+          console.log("new overlay element", overlayElement);
+        } else {
+          overlayElementsToRemove.delete(overlayElement);
+        }
+
+        if (updateStyle) {
+          this.overlayElements.add(overlayElement);
+
+          const color = this.randomColor();
+
+          overlayElement._id = id;
+          overlayElement.id = `${id}-${clsString}`;
+          overlayElement.style.borderColor = color;
+
+          label = overlayElement.querySelector(".label");
+          label.style.color = color;
+          label.innerText = `${id} ${clsString}`;
+        }
+
+        overlayElement.style.display = "";
+
+        const _width = width;
+        const _height = height / windowHeightScalar;
+
+        overlayElement.style.height = `${_height * 100}%`;
+        overlayElement.style.width = `${_width * 100}%`;
+
+        overlayElement.style.left = `${(x - _width / 2) * 100}%`;
+        overlayElement.style.top = `${
+          (y * windowHeightScalar - _height / 2) * 100
+        }%`;
+      }
+    });
+
+    overlayElementsToRemove.forEach((overlayElement) => {
+      console.log("hiding", overlayElement);
+      this.overlayElements.delete(overlayElement);
+      this.unusedOverlayElements.add(overlayElement);
+      overlayElement.style.display = "none";
     });
   },
 
