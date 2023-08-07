@@ -1,6 +1,8 @@
 AFRAME.registerSystem("yolo", {
   schema: {
     port: { type: "string", default: "8443" },
+    showIntersections: { type: "boolean", default: false },
+    showBox: { type: "boolean", default: true },
   },
 
   init: function () {
@@ -8,9 +10,16 @@ AFRAME.registerSystem("yolo", {
     this.showResultsInOverlay = !AFRAME.utils.device.isOculusBrowser();
     this.entities = [];
 
+    this.results = {}; // {id: {cls, clsString, overlayElement, box3}}
+
     this.overlay = document.getElementById("overlay");
     this.overlayElements = new Set();
     this.unusedOverlayElements = new Set();
+
+    // https://github.com/mayognaise/aframe-mouse-cursor-component/blob/master/index.js#L20C3-L21C36
+    this.raycaster = new THREE.Raycaster();
+    this.camera = document.getElementById("camera");
+    this.intersectionMarkers = [];
 
     this.classes = {
       0: "person",
@@ -150,13 +159,6 @@ AFRAME.registerSystem("yolo", {
       return value;
     }
   },
-  getOverlayElementById: function (id) {
-    for (const overlayElement of this.overlayElements) {
-      if (overlayElement._id == id) {
-        return overlayElement;
-      }
-    }
-  },
 
   randomColor: function () {
     return this.colors[Math.floor(Math.random() * this.colors.length)];
@@ -164,21 +166,53 @@ AFRAME.registerSystem("yolo", {
 
   onResults: function (results) {
     const windowHeightScalar = window.innerHeight / window.outerHeight;
-    const windowHeightOffset = 1 - windowHeightScalar;
-    console.log("windowHeightOffset", windowHeightOffset);
-    const overlayElementsToRemove = new Set(this.overlayElements);
-    results.forEach((result) => {
-      const { id, cls, conf, xywhn } = result;
+    this.overlayElements.forEach((overlayElement) => {
+      overlayElement._shouldRemove = true;
+    });
+    for (id in this.results) {
+      this.results[id]._visible = false;
+    }
+    results.forEach((_result, index) => {
+      const { id, cls, conf, xywhn } = _result;
       const [x, y, width, height] = xywhn;
       const clsString = this.classes[cls];
-      console.log(id, clsString, conf, xywhn);
+
+      if (!this.results[id]) {
+        const result = (this.results[id] = {
+          id,
+          cls,
+          clsString,
+          visible: true,
+          isNew: true,
+          box3: new THREE.Box3(),
+          _box3: new THREE.Box3(),
+          overlayElement: null,
+          box: null,
+          color: this.randomColor(),
+        });
+        if (this.data.showBox) {
+          const box = (result.box = document.createElement("a-box"));
+          box.setAttribute("color", result.color);
+          box.setAttribute("width", "0");
+          box.setAttribute("height", "0");
+          box.setAttribute("depth", "0");
+          this.sceneEl.appendChild(box);
+        }
+      }
+      const result = this.results[id];
+      result._visible = true;
+
+      const _width = width;
+      const _height = height / windowHeightScalar;
+      const _y = y * windowHeightScalar;
+
       if (this.showResultsInOverlay) {
         let updateStyle = false;
-        let overlayElement = this.getOverlayElementById(id);
+        let overlayElement = result.overlayElement;
         if (!overlayElement) {
           overlayElement = this.shiftSet(this.unusedOverlayElements);
           if (overlayElement) {
-            console.log("recycling", overlayElement);
+            //console.log("recycling", overlayElement);
             updateStyle = true;
           }
         }
@@ -190,46 +224,110 @@ AFRAME.registerSystem("yolo", {
           label.classList.add("label");
           overlayElement.appendChild(label);
           this.overlay.appendChild(overlayElement);
-          console.log("new overlay element", overlayElement);
+          //console.log("new overlay element", overlayElement);
         } else {
-          overlayElementsToRemove.delete(overlayElement);
+          overlayElement._shouldRemove = false;
         }
+
+        result.overlayElement = overlayElement;
 
         if (updateStyle) {
           this.overlayElements.add(overlayElement);
 
-          const color = this.randomColor();
-
           overlayElement._id = id;
           overlayElement.id = `${id}-${clsString}`;
-          overlayElement.style.borderColor = color;
+          overlayElement.style.borderColor = result.color;
 
           label = overlayElement.querySelector(".label");
-          label.style.color = color;
+          label.style.color = result.color;
           label.innerText = `${id} ${clsString}`;
         }
 
         overlayElement.style.display = "";
 
-        const _width = width;
-        const _height = height / windowHeightScalar;
-
         overlayElement.style.height = `${_height * 100}%`;
         overlayElement.style.width = `${_width * 100}%`;
 
         overlayElement.style.left = `${(x - _width / 2) * 100}%`;
-        overlayElement.style.top = `${
-          (y * windowHeightScalar - _height / 2) * 100
-        }%`;
+        overlayElement.style.top = `${(_y - _height / 2) * 100}%`;
+      }
+
+      const halfWidth = width / 2;
+      const halfHeight = _height / 2;
+      const corners = [
+        [x - halfWidth, _y - halfHeight],
+        [x + halfWidth, _y - halfHeight],
+        [x - halfWidth, _y + halfHeight],
+        [x + halfWidth, _y + halfHeight],
+      ];
+      const intersections = corners.map((xy, i) =>
+        this.intersect(...xy, index == 0 ? i : -1)
+      );
+      console.log(intersections);
+      // FILL - create box3 from intersections[i].point
+    });
+
+    this.overlayElements.forEach((overlayElement) => {
+      if (overlayElement._shouldRemove) {
+        this.overlayElements.delete(overlayElement);
+        this.unusedOverlayElements.add(overlayElement);
+        overlayElement.style.display = "none";
       }
     });
 
-    overlayElementsToRemove.forEach((overlayElement) => {
-      console.log("hiding", overlayElement);
-      this.overlayElements.delete(overlayElement);
-      this.unusedOverlayElements.add(overlayElement);
-      overlayElement.style.display = "none";
-    });
+    for (id in this.results) {
+      const result = this.results[id];
+      if (result.visible != result._visible) {
+        result.visible = result._visible;
+        // object changed visibility
+      }
+      if (result.isNew) {
+        delete result.isNew;
+        // new object detected
+      }
+    }
+  },
+
+  intersect: function (x, y, intersectionIndex = -1) {
+    x = (x - 0.5) * 2;
+    y = 1 - y;
+    y = (y - 0.5) * 2;
+
+    // https://github.com/mayognaise/aframe-mouse-cursor-component/blob/master/index.js#L393
+    const camera = this.camera.getObject3D("camera");
+    this.raycaster.ray.origin.setFromMatrixPosition(camera.matrixWorld);
+    this.raycaster.ray.direction
+      .set(x, y, 0.5)
+      .unproject(camera)
+      .sub(this.raycaster.ray.origin)
+      .normalize();
+
+    const intersectables = Array.from(
+      document.querySelectorAll(".allow-ray")
+    ).map((entity) => entity.object3D);
+
+    const intersectons = this.raycaster.intersectObjects(intersectables);
+    const intersecton = intersectons[0];
+    if (intersecton) {
+      if (intersectionIndex >= 0 && this.data.showIntersections) {
+        let intersectionMarker = this.intersectionMarkers[intersectionIndex];
+        if (!intersectionMarker) {
+          intersectionMarker = document.createElement("a-sphere");
+          intersectionMarker.setAttribute(
+            "color",
+            this.colors[intersectionIndex]
+          );
+          intersectionMarker.setAttribute("radius", "0.1");
+          this.intersectionMarkers[intersectionIndex] = intersectionMarker;
+          this.sceneEl.appendChild(intersectionMarker);
+        }
+        intersectionMarker.setAttribute(
+          "position",
+          intersecton.point.toArray().join(" ")
+        );
+      }
+      return intersecton;
+    }
   },
 
   update: function (oldData) {
