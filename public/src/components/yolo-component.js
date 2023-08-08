@@ -1,8 +1,8 @@
 AFRAME.registerSystem("yolo", {
   schema: {
     port: { type: "string", default: "8443" },
-    showIntersections: { type: "boolean", default: false },
-    showBox: { type: "boolean", default: true },
+    showIntersections: { type: "boolean", default: true },
+    showBoxes: { type: "boolean", default: true },
   },
 
   init: function () {
@@ -10,11 +10,14 @@ AFRAME.registerSystem("yolo", {
     this.showResultsInOverlay = !AFRAME.utils.device.isOculusBrowser();
     this.entities = [];
 
-    this.results = {}; // {id: {cls, clsString, overlayElement, box3}}
+    this.results = {}; // {id: {cls, clsString, overlayElement, box3, _box3, box}}
 
     this.overlay = document.getElementById("overlay");
     this.overlayElements = new Set();
     this.unusedOverlayElements = new Set();
+
+    this.boxEntities = new Set();
+    this.unusedBoxEntities = new Set();
 
     // https://github.com/mayognaise/aframe-mouse-cursor-component/blob/master/index.js#L20C3-L21C36
     this.raycaster = new THREE.Raycaster();
@@ -166,9 +169,16 @@ AFRAME.registerSystem("yolo", {
 
   onResults: function (results) {
     const windowHeightScalar = window.innerHeight / window.outerHeight;
-    this.overlayElements.forEach((overlayElement) => {
-      overlayElement._shouldRemove = true;
-    });
+    if (this.showResultsInOverlay) {
+      this.overlayElements.forEach((overlayElement) => {
+        overlayElement._shouldRemove = true;
+      });
+    }
+    if (this.data.showBoxes) {
+      this.boxEntities.forEach((boxEntity) => {
+        boxEntity._shouldRemove = true;
+      });
+    }
     for (id in this.results) {
       this.results[id]._visible = false;
     }
@@ -178,7 +188,7 @@ AFRAME.registerSystem("yolo", {
       const clsString = this.classes[cls];
 
       if (!this.results[id]) {
-        const result = (this.results[id] = {
+        this.results[id] = {
           id,
           cls,
           clsString,
@@ -189,15 +199,7 @@ AFRAME.registerSystem("yolo", {
           overlayElement: null,
           box: null,
           color: this.randomColor(),
-        });
-        if (this.data.showBox) {
-          const box = (result.box = document.createElement("a-box"));
-          box.setAttribute("color", result.color);
-          box.setAttribute("width", "0");
-          box.setAttribute("height", "0");
-          box.setAttribute("depth", "0");
-          this.sceneEl.appendChild(box);
-        }
+        };
       }
       const result = this.results[id];
       result._visible = true;
@@ -206,18 +208,52 @@ AFRAME.registerSystem("yolo", {
       const _height = height / windowHeightScalar;
       const _y = y * windowHeightScalar;
 
+      if (this.data.showBoxes) {
+        let shouldUpateBox = false;
+
+        let box = result.box;
+        if (!box) {
+          box = this.shiftSet(this.unusedBoxEntities);
+          if (box) {
+            //console.log("recycling box", box);
+            shouldUpateBox = true;
+          }
+        }
+        if (!box) {
+          box = document.createElement("a-box");
+          box.setAttribute("color", result.color);
+          box.setAttribute("width", "0");
+          box.setAttribute("height", "0");
+          box.setAttribute("depth", "0");
+          box.setAttribute("visible", this.data.showBoxes);
+          //console.log("created box", box);
+          shouldUpateBox = true;
+          this.sceneEl.appendChild(box);
+        } else {
+          box._shouldRemove = false;
+        }
+        result.box = box;
+
+        if (shouldUpateBox) {
+          this.boxEntities.add(box);
+
+          box._id = id;
+          box.id = `box-${id}-${clsString}`;
+          //console.log("recycled box", box);
+        }
+      }
+
       if (this.showResultsInOverlay) {
-        let updateStyle = false;
+        let shouldUpdateOverlay = false;
         let overlayElement = result.overlayElement;
         if (!overlayElement) {
           overlayElement = this.shiftSet(this.unusedOverlayElements);
           if (overlayElement) {
             //console.log("recycling", overlayElement);
-            updateStyle = true;
+            shouldUpdateOverlay = true;
           }
         }
         if (!overlayElement) {
-          updateStyle = true;
           overlayElement = document.createElement("div");
           overlayElement.classList.add("result");
           const label = document.createElement("div");
@@ -225,17 +261,17 @@ AFRAME.registerSystem("yolo", {
           overlayElement.appendChild(label);
           this.overlay.appendChild(overlayElement);
           //console.log("new overlay element", overlayElement);
+          shouldUpdateOverlay = true;
         } else {
           overlayElement._shouldRemove = false;
         }
-
         result.overlayElement = overlayElement;
 
-        if (updateStyle) {
+        if (shouldUpdateOverlay) {
           this.overlayElements.add(overlayElement);
 
           overlayElement._id = id;
-          overlayElement.id = `${id}-${clsString}`;
+          overlayElement.id = `overlay-${id}-${clsString}`;
           overlayElement.style.borderColor = result.color;
 
           label = overlayElement.querySelector(".label");
@@ -263,17 +299,29 @@ AFRAME.registerSystem("yolo", {
       const intersections = corners.map((xy, i) =>
         this.intersect(...xy, index == 0 ? i : -1)
       );
-      console.log(intersections);
+      console.log("intersections", intersections);
       // FILL - create box3 from intersections[i].point
     });
 
-    this.overlayElements.forEach((overlayElement) => {
-      if (overlayElement._shouldRemove) {
-        this.overlayElements.delete(overlayElement);
-        this.unusedOverlayElements.add(overlayElement);
-        overlayElement.style.display = "none";
-      }
-    });
+    if (this.showResultsInOverlay) {
+      this.overlayElements.forEach((overlayElement) => {
+        if (overlayElement._shouldRemove) {
+          this.overlayElements.delete(overlayElement);
+          this.unusedOverlayElements.add(overlayElement);
+          overlayElement.style.display = "none";
+        }
+      });
+    }
+
+    if (this.data.showBoxes) {
+      this.boxEntities.forEach((boxEntity) => {
+        if (boxEntity._shouldRemove) {
+          this.boxEntities.delete(boxEntity);
+          this.unusedBoxEntities.add(boxEntity);
+          boxEntity.setAttribute("visible", "false");
+        }
+      });
+    }
 
     for (id in this.results) {
       const result = this.results[id];
@@ -335,7 +383,10 @@ AFRAME.registerSystem("yolo", {
 
     const diffKeys = Object.keys(diff);
 
-    if (diffKeys.includes("key")) {
+    if (diffKeys.includes("showBoxes")) {
+      this.boxEntities.forEach((boxEntity) => {
+        boxEntity.setAttribute("visible", this.data.showBoxes);
+      });
     }
   },
 
