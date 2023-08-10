@@ -1,8 +1,12 @@
 AFRAME.registerSystem("yolo", {
   schema: {
     port: { type: "string", default: "8443" },
+    useTestImage: { type: "boolean", default: true },
     showIntersections: { type: "boolean", default: true },
     showBoxes: { type: "boolean", default: true },
+    leftThumbstickScalar: { type: "number", default: 0.02 },
+    rightThumbstickScalar: { type: "number", default: 0.01 },
+    cameraInterval: { type: "number", default: 0 },
   },
 
   init: function () {
@@ -10,7 +14,53 @@ AFRAME.registerSystem("yolo", {
     this.showResultsInOverlay = !AFRAME.utils.device.isOculusBrowser();
     this.entities = [];
 
-    this.results = {}; // {id: {cls, clsString, overlayElement, box3, _box3, box}}
+    this.results = {}; // {id: {cls, clsString, overlayElement, obb, _obb, q, box}}
+
+    this.sceneEl.addEventListener("loaded", () => {
+      this.imageEntity = document.querySelector("#image");
+      this.imageOptions = {
+        image: null,
+        center: { x: 0.5, y: 0.5 },
+        scale: 1,
+      };
+      this.canvas = document.querySelector("#canvas");
+      this.context = this.canvas.getContext("2d");
+      this.controllers = {
+        left: document.querySelector("#leftHandControls"),
+        right: document.querySelector("#rightHandControls"),
+      };
+      this.controllers.left.addEventListener(
+        "thumbstickmoved",
+        this.onLeftThumbstickMoved.bind(this)
+      );
+      this.controllers.right.addEventListener(
+        "thumbstickmoved",
+        this.onRightThumbstickMoved.bind(this)
+      );
+      this.controllers.left.addEventListener(
+        "xbuttondown",
+        this.onXButtonDown.bind(this)
+      );
+      this.controllers.left.addEventListener(
+        "ybuttondown",
+        this.onYButtonDown.bind(this)
+      );
+      this.controllers.left.addEventListener(
+        "triggerdown",
+        this.onLeftTriggerDown.bind(this)
+      );
+      if (this.data.useTestImage) {
+        this.imageOptions.image = testImage;
+        this.drawImage();
+      }
+
+      if (this.data.cameraInterval > 0) {
+        this.intervalId = window.setInterval(
+          () => this.sendCameraInformation(),
+          this.data.cameraInterval
+        );
+      }
+    });
 
     this.overlay = document.getElementById("overlay");
     this.overlayElements = new Set();
@@ -112,7 +162,114 @@ AFRAME.registerSystem("yolo", {
     this.setupWebsocketConnection();
   },
 
-  setupWebsocketConnection: function (onMessage, onConnect) {
+  sendCameraInformation: function () {
+    if (this.sendWebsocketMessage) {
+      this.sendWebsocketMessage({
+        position: this.camera.object3D.position.toArray(),
+        rotation: this.camera.object3D.rotation.toArray().slice(0, 3),
+      });
+    }
+  },
+
+  drawImage: function () {
+    const { canvas, context, imageEntity } = this;
+    const { image, center, scale } = this.imageOptions;
+    if (imageEntity) {
+      const imageOffset = {
+        left: center.x - 0.5 / scale,
+        top: center.y - 0.5 / scale,
+      };
+      const s = {
+        x: imageOffset.left * image.width,
+        y: imageOffset.top * image.height,
+        width: image.width / scale,
+        height: image.height / scale,
+      };
+      const d = {
+        x: 0,
+        y: 0,
+        width: canvas.width,
+        height: canvas.height,
+      };
+
+      context.clearRect(0, 0, canvas.width, canvas.height);
+      context.drawImage(
+        image,
+        s.x,
+        s.y,
+        s.width,
+        s.height,
+        d.x,
+        d.y,
+        d.width,
+        d.height
+      );
+      imageEntity.getObject3D("mesh").material.map.needsUpdate = true;
+    }
+  },
+
+  onLeftThumbstickMoved: function (event) {
+    let { x, y } = event.detail;
+    x *= this.data.leftThumbstickScalar;
+    y *= this.data.leftThumbstickScalar;
+
+    let didChange = false;
+
+    if (!this.scaleWithLeftThumbstick) {
+      const center = {
+        x: this.imageOptions.center.x - x,
+        y: this.imageOptions.center.y - y,
+      };
+      center.x = THREE.MathUtils.clamp(center.x, 0, 1);
+      center.y = THREE.MathUtils.clamp(center.y, 0, 1);
+      didCenterChange =
+        this.imageOptions.center.x != center.x ||
+        this.imageOptions.center.y != center.y;
+      if (didCenterChange) {
+        this.imageOptions.center = center;
+        didChange = true;
+      }
+    } else {
+      let scale = this.imageOptions.scale + y;
+      scale = THREE.MathUtils.clamp(scale, 0.1, 3);
+      didScaleChange = this.imageOptions.scale != scale;
+      if (didScaleChange) {
+        this.imageOptions.scale = scale;
+        didChange = true;
+      }
+    }
+    if (didChange) {
+      this.drawImage();
+    }
+  },
+  onRightThumbstickMoved: function (event) {
+    let { x, y } = event.detail;
+    x *= this.data.rightThumbstickScalar;
+    y *= this.data.rightThumbstickScalar;
+
+    // FILL 3 - y to move forward/back
+    // have cone that represents the position/orientation you're polling
+  },
+  onXButtonDown: function () {
+    this.requestSnapshot();
+  },
+  onYButtonDown: function () {
+    this.toggleMagnifyingGlass();
+  },
+  onLeftTriggerDown: function () {
+    this.scaleWithLeftThumbstick = !this.scaleWithLeftThumbstick;
+  },
+
+  toggleMagnifyingGlass: function () {
+    if (this.imageEntity) {
+      this.imageEntity.object3D.visible = !this.imageEntity.object3D.visible;
+    }
+  },
+  requestSnapshot: function () {
+    // FILL 4 - send websocket message
+  },
+
+  setupWebsocketConnection: function () {
     let socket;
 
     const createSocket = () => {
@@ -131,6 +288,7 @@ AFRAME.registerSystem("yolo", {
       });
       socket.addEventListener("close", (event) => {
         console.log("connection closed");
+        this.sendWebsocketMessage = null;
         setTimeout(() => createSocket(), 1000);
       });
     };
@@ -194,8 +352,10 @@ AFRAME.registerSystem("yolo", {
           clsString,
           visible: true,
           isNew: true,
-          box3: new THREE.Box3(),
-          _box3: new THREE.Box3(),
+          obb: null,
+          // https://mugen87.github.io/yuka/docs/OBB.html
+          _obb: new YUKA.OBB(),
+          quaternion: new YUKA.Quaternion(),
           overlayElement: null,
           box: null,
           color: this.randomColor(),
@@ -222,17 +382,15 @@ AFRAME.registerSystem("yolo", {
         if (!box) {
           box = document.createElement("a-box");
           box.setAttribute("color", result.color);
-          box.setAttribute("width", "0");
-          box.setAttribute("height", "0");
-          box.setAttribute("depth", "0");
+          box.setAttribute("scale", "0 0 0");
+          box.setAttribute("opacity", "0.2");
           box.setAttribute("visible", this.data.showBoxes);
           //console.log("created box", box);
           shouldUpateBox = true;
           this.sceneEl.appendChild(box);
-        } else {
-          box._shouldRemove = false;
         }
         result.box = box;
+        result.box._shouldRemove = false;
 
         if (shouldUpateBox) {
           this.boxEntities.add(box);
@@ -262,10 +420,9 @@ AFRAME.registerSystem("yolo", {
           this.overlay.appendChild(overlayElement);
           //console.log("new overlay element", overlayElement);
           shouldUpdateOverlay = true;
-        } else {
-          overlayElement._shouldRemove = false;
         }
         result.overlayElement = overlayElement;
+        overlayElement._shouldRemove = false;
 
         if (shouldUpdateOverlay) {
           this.overlayElements.add(overlayElement);
@@ -300,7 +457,31 @@ AFRAME.registerSystem("yolo", {
         this.intersect(...xy, index == 0 ? i : -1)
       );
       console.log("intersections", intersections);
-      // FILL - create box3 from intersections[i].point
+
+      const points = [];
+      intersections.forEach((intersection) => {
+        if (intersection) {
+          points.push(intersection.point);
+        }
+      });
+      points.push(this.camera.object3D.position);
+      if (points.length >= 4) {
+        result._obb.fromPoints(points);
+        if (!result.obb) {
+          result.obb = result._obb.clone();
+        } else {
+          result.obb.intersectsOBB(result._obb);
+        }
+        //console.log("obb", result.obb);
+
+        if (result.box.hasLoaded) {
+          this.updateResultBox(result);
+        } else {
+          result.box.addEventListener("loaded", () =>
+            this.updateResultBox(result)
+          );
+        }
+      }
     });
 
     if (this.showResultsInOverlay) {
@@ -318,7 +499,9 @@ AFRAME.registerSystem("yolo", {
         if (boxEntity._shouldRemove) {
           this.boxEntities.delete(boxEntity);
           this.unusedBoxEntities.add(boxEntity);
+          // FIX!!
           boxEntity.setAttribute("visible", "false");
+          delete boxEntity._shouldRemove;
         }
       });
     }
@@ -334,6 +517,28 @@ AFRAME.registerSystem("yolo", {
         // new object detected
       }
     }
+  },
+
+  updateResultBox: function (result) {
+    const { obb, box, quaternion, id } = result;
+    console.log(id, "visible?", box.object3D.visible);
+    quaternion.fromMatrix3(obb.rotation);
+    {
+      // const { x, y, z, w } = quaternion;
+      // box.object3D.quaternion.set(x, y, z, w);
+      // console.log("quaternion", box.object3D.quaternion);
+      const { x, y, z } = quaternion.toEuler({});
+      box.object3D.rotation.set(x, y, z);
+      console.log(id, "euler", box.object3D.rotation);
+    }
+    box.object3D.position.copy(obb.center);
+    console.log(id, "position", box.object3D.position);
+    {
+      const { x, y, z } = obb.halfSizes;
+      box.object3D.scale.set(x * 2, y * 2, z * 2);
+      console.log(id, "scale", box.object3D.scale);
+    }
+    // FIX
   },
 
   intersect: function (x, y, intersectionIndex = -1) {

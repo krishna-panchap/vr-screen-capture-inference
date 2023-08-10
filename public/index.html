@@ -2,6 +2,8 @@
   <head>
     <title>Yolo</title>
     <script crossorigin="anonymous" src="src/aframe.min.js"></script>
+    <!-- https://mugen87.github.io/yuka/docs/OBB.html -->
+    <script src="src/yuka.min.js"></script>
     <script src="src/components/persistent-anchors-component.js"></script>
     <script src="src/components/camera-controls-component.js"></script>
     <script src="src/components/detected-planes-component.js"></script>
@@ -51,6 +53,8 @@
       <a-assets>
         <a-asset-item id="roomModel" src="assets/room.glb"></a-asset-item>
         <a-asset-item id="anchorModel" src="assets/anchor.glb"></a-asset-item>
+        <canvas id="canvas" width="1000" height="1000"></canvas>
+        <img id="testImage" src="assets/dog.jpeg" />
       </a-assets>
 
       <a-entity visible="false" id="anchor">
@@ -79,6 +83,15 @@
         oculus-touch-controls="hand: right; model: false;"
         camera-controls="hand: right;"
       >
+        <a-plane
+          id="image"
+          width="0.2"
+          height="0.2"
+          rotation="-97.4 0 0"
+          position="0 0 0"
+          material="src: #canvas; shader: flat;"
+        ></a-plane>
+
         <a-box visible="false" color="red" scale="0.01 0.01 0.01"></a-box>
         <a-entity position="0 -0.2 -0.1" id="handAnchor" visible="false">
           <a-entity

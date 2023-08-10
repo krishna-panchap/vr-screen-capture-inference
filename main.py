@@ -36,6 +36,13 @@ ssl_keyfile = get_path("sec/private_key.key")
 
 websocket_clients = set()
 
+camera_position = [0, 0, 0]
+camera_rotation = [0, 0, 0]
+
+screenshots = []
+screenshot_positions = []
+screenshot_rotations = []
+
 
 async def websocket_handler(websocket_client):
     if websocket_client not in websocket_clients:
@@ -46,6 +53,13 @@ async def websocket_handler(websocket_client):
         print(f"Received message: {message_object}")
         message_type = message_object.get("type", "")
         match message_type:
+            case "camera":
+                camera_position = message_object["position"]
+                camera_rotation = message_object["rotation"]
+                # print(f"position: {camera_position}, rotation: {camera_rotation}")
+            case "screenshot":
+                # find picture that is closest to the current position/rotation
+                pass
             case _:
                 print(f'uncaught message type "{message_type}"')
 
@@ -116,6 +130,7 @@ async def setup_yolo():
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes(
                     'RGB', (monitor["width"]*pixel_scalar, monitor["height"]*pixel_scalar), screenshot.rgb)
+                # FILL - save screenshot if a unique position/orientation
                 screenshot_array = np.array(img)
                 screen = cv2.cvtColor(screenshot_array, cv2.COLOR_RGB2BGR)
                 results = model.track(
@@ -165,7 +180,7 @@ def main():
     websocket_thread = threading.Thread(target=setup_websocket_server)
     websocket_thread.start()
 
-    asyncio.run(setup_yolo())
+    # asyncio.run(setup_yolo())
 
     # Wait for the WebSocket server thread to finish (which will be never unless stopped manually)
     websocket_thread.join()

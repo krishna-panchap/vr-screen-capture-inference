@@ -2,7 +2,7 @@
 AFRAME.registerComponent("camera-controls", {
   schema: {
     scalar: { type: "number", default: 0.01 },
-    hand: { default: "right", oneOf: ["left", "right"] },
+    hand: { type: "string", default: "right", oneOf: ["left", "right"] },
     toggleVisibility: {
       type: "selectorAll",
       default: "[data-toggle-visibility]",
@@ -21,10 +21,12 @@ AFRAME.registerComponent("camera-controls", {
     this.anchor = document.getElementById("handAnchor");
 
     // this.el.addEventListener("thumbstickmoved", this.controlCamera.bind(this));
-    this.el.addEventListener("abuttondown", this.toggleVisibility.bind(this));
-    this.el.addEventListener("bbuttondown", this.createAnchor.bind(this));
-    this.el.addEventListener("triggerdown", this.showAnchor.bind(this));
-    this.el.addEventListener("triggerup", this.hideAnchor.bind(this));
+    if (this.data.hand == "right") {
+      this.el.addEventListener("abuttondown", this.toggleVisibility.bind(this));
+      this.el.addEventListener("bbuttondown", this.createAnchor.bind(this));
+      this.el.addEventListener("triggerdown", this.showAnchor.bind(this));
+      this.el.addEventListener("triggerup", this.hideAnchor.bind(this));
+    }
 
     this.showEntities = true;
   },
