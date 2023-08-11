@@ -77,8 +77,12 @@
           rotation="0 0 0"
           position="0 0 -0.2"
           material="src: #canvas; shader: flat;"
+          visible="false"
         ></a-plane>
         <a-entity id="cameraForward" position="0 0 -10"></a-entity>
+        <a-entity id="snapshotMarker" position="0 0 0" visible="false">
+          <a-sphere color="red" radius="0.01"></a-sphere>
+        </a-entity>
       </a-camera>
 
       <a-entity

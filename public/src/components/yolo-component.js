@@ -5,8 +5,8 @@ AFRAME.registerSystem("yolo", {
     showIntersections: { type: "boolean", default: true },
     showBoxes: { type: "boolean", default: true },
     leftThumbstickScalar: { type: "number", default: 0.02 },
-    rightThumbstickScalar: { type: "number", default: 0.01 },
-    cameraInterval: { type: "number", default: 0 },
+    rightThumbstickScalar: { type: "number", default: 0.02 },
+    cameraInterval: { type: "number", default: 100 },
   },
 
   init: function () {
@@ -61,6 +61,12 @@ AFRAME.registerSystem("yolo", {
         this.imageOptions.image = testImage;
         this.drawImage();
       }
+
+      this.snapshotMarker = document.querySelector("#snapshotMarker");
+      this.snapshotOptions = {
+        distance: 0,
+        position: new THREE.Vector3(),
+      };
 
       if (this.data.cameraInterval > 0) {
         this.intervalId = window.setInterval(
@@ -172,10 +178,36 @@ AFRAME.registerSystem("yolo", {
 
   sendCameraInformation: function () {
     if (this.sendWebsocketMessage) {
-      this.sendWebsocketMessage({
-        position: this.camera.object3D.position.toArray(),
-        rotation: this.camera.object3D.rotation.toArray().slice(0, 3),
-      });
+      const position = this.camera.object3D.position.clone();
+      const rotation = this.camera.object3D.rotation.clone();
+      let didCameraChange = false;
+      if (!this.previousCameraTransform) {
+        didCameraChange = true;
+      } else {
+        this.diffVector = this.diffVector || new THREE.Vector3();
+        this.diffVector.subVectors(
+          this.previousCameraTransform.rotation,
+          rotation
+        );
+        didCameraChange = didCameraChange || this.diffVector.length() > 0.01;
+        this.diffVector.subVectors(
+          this.previousCameraTransform.position,
+          position
+        );
+        didCameraChange = didCameraChange || this.diffVector.length() > 0.01;
+      }
+      if (didCameraChange) {
+        this.previousCameraTransform = { position, rotation };
+        const message = {
+          type: "camera",
+          position: position.toArray().map((value) => Number(value.toFixed(3))),
+          rotation: rotation
+            .toArray()
+            .slice(0, 3)
+            .map((value) => Number(value.toFixed(3))),
+        };
+        this.sendWebsocketMessage(message);
+      }
     }
   },
 
@@ -255,8 +287,19 @@ AFRAME.registerSystem("yolo", {
     x *= this.data.rightThumbstickScalar;
     y *= this.data.rightThumbstickScalar;
 
-    // FILL 3 - y to move forward/back
-    // have cone that represents the position/orientation you're polling
+    let distance = this.snapshotOptions.distance - y;
+    distance = THREE.MathUtils.clamp(distance, 0, 10);
+    this.snapshotOptions.distance = distance;
+
+    this.snapshotMarker.object3D.position.z = -distance;
+    this.snapshotMarker.object3D.visible = distance > 0.2;
+
+    this.snapshotMarker.object3D.getWorldPosition(
+      this.snapshotOptions.position
+    );
+
+    console.log(this.snapshotOptions.position);
+    this.requestSnapshot();
   },
   onXButtonDown: function () {
     this.requestSnapshot();
@@ -274,7 +317,7 @@ AFRAME.registerSystem("yolo", {
     }
   },
   requestSnapshot: function () {
-    // FILL 4 - send websocket message
+    // FILL - send websocket message
   },
 
   setupWebsocketConnection: function () {

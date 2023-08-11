@@ -44,19 +44,27 @@ screenshot_positions = []
 screenshot_rotations = []
 
 
+# used to determine if a new screenshot should be saved, and retrieve screenshots for "zooming in"
+def find_closest_screenshot_index(position: [float], rotation: [float]) -> int:
+    closest_screenshot_index = -1
+    # FILL
+    return closest_screenshot_index
+
+
 async def websocket_handler(websocket_client):
     if websocket_client not in websocket_clients:
         print("new websocket client")
         websocket_clients.add(websocket_client)
     async for message in websocket_client:
         message_object: dict = json.loads(message)
-        print(f"Received message: {message_object}")
+        # print(f"Received message: {message_object}")
         message_type = message_object.get("type", "")
         match message_type:
             case "camera":
                 camera_position = message_object["position"]
                 camera_rotation = message_object["rotation"]
-                # print(f"position: {camera_position}, rotation: {camera_rotation}")
+                print(f"rotation: {camera_rotation}")
+                print(f"position: {camera_position}")
             case "screenshot":
                 # find picture that is closest to the current position/rotation
                 pass
