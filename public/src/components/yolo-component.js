@@ -11,13 +11,21 @@ AFRAME.registerSystem("yolo", {
 
   init: function () {
     window.yoloSystem = this;
-    this.showResultsInOverlay = !AFRAME.utils.device.isOculusBrowser();
+    this.isOculusBrowser = AFRAME.utils.device.isOculusBrowser();
+    this.showResultsInOverlay = !this.isOculusBrowser;
     this.entities = [];
 
     this.results = {}; // {id: {cls, clsString, overlayElement, obb, _obb, q, box}}
 
     this.sceneEl.addEventListener("loaded", () => {
-      this.imageEntity = document.querySelector("#image");
+      this.imageEntity = document.querySelector(
+        `.image.${this.isOculusBrowser ? "hand" : "camera"}`
+      );
+      document.querySelectorAll(".image").forEach((imageEntity) => {
+        if (imageEntity != this.imageEntity) {
+          imageEntity.remove();
+        }
+      });
       this.imageOptions = {
         image: null,
         center: { x: 0.5, y: 0.5 },

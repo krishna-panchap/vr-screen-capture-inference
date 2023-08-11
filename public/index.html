@@ -70,6 +70,14 @@
       </a-entity>
 
       <a-camera position="0 1.6 0" id="camera">
+        <a-plane
+          class="image camera"
+          width="0.2"
+          height="0.2"
+          rotation="0 0 0"
+          position="0 0 -0.2"
+          material="src: #canvas; shader: flat;"
+        ></a-plane>
         <a-entity id="cameraForward" position="0 0 -10"></a-entity>
       </a-camera>
 
@@ -84,7 +92,7 @@
         camera-controls="hand: right;"
       >
         <a-plane
-          id="image"
+          class="image hand"
           width="0.2"
           height="0.2"
           rotation="-97.4 0 0"
