@@ -316,8 +316,11 @@ AFRAME.registerSystem("yolo", {
       this.imageEntity.object3D.visible = !this.imageEntity.object3D.visible;
     }
   },
-  requestSnapshot: function () {
-    // FILL - send websocket message
+  requestSnapshot: async function () {
+    if (!this._isRequestingSnapshot) {
+      this._isRequestingSnapshot = true;
+      // FILL - get request
+    }
   },
 
   setupWebsocketConnection: function () {
