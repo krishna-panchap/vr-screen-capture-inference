@@ -156,3 +156,4 @@ cython_debug/
 *.txt
 .DS_Store
 sec/
+.vscode

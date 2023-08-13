@@ -17,7 +17,6 @@ import pyautogui
 import math
 
 # I used ChatGPT for the web server stuff :)
-
 project_directory = os.path.dirname(os.path.abspath(__file__))
 
 
@@ -47,8 +46,7 @@ screenshot_rotations = []
 
 # ChatGPT
 def difference_lists(list1, list2, abs_difference=False):
-    diffs = [abs(a - b) if abs_difference else a -
-             b for a, b in zip(list1, list2)]
+    diffs = [abs(a - b) if abs_difference else a - b for a, b in zip(list1, list2)]
     return diffs
 
 
@@ -86,12 +84,10 @@ def find_closest_screenshot_index(position: [float], rotation: [float]) -> int:
     lowest_length = distance_threshold
     for index in range(number_of_screenshots):
         screenshot_position = screenshot_positions[index]
-        squared_distance = get_position_squared_length(
-            screenshot_position, position)
+        squared_distance = get_position_squared_length(screenshot_position, position)
         if squared_distance < lowest_length:
             screenshot_rotation = screenshot_rotations[index]
-            rotation_is_valid = is_rotation_valid(
-                rotation, screenshot_rotation)
+            rotation_is_valid = is_rotation_valid(rotation, screenshot_rotation)
             if rotation_is_valid:
                 lowest_length = squared_distance
                 closest_screenshot_index = index
@@ -125,9 +121,10 @@ async def start_websocket_server():
     ssl_wss_context.load_cert_chain(ssl_certfile, keyfile=ssl_keyfile)
 
     # Start the secure WebSocket server
-    start_server = await websockets.serve(websocket_handler, bind_address, port_wss, ssl=ssl_wss_context)
-    print(
-        f"Secure WebSocket server running at wss://{bind_address}:{port_wss}/")
+    start_server = await websockets.serve(
+        websocket_handler, bind_address, port_wss, ssl=ssl_wss_context
+    )
+    print(f"Secure WebSocket server running at wss://{bind_address}:{port_wss}/")
 
     await start_server.wait_closed()
 
@@ -144,12 +141,12 @@ class quietServer(http.server.SimpleHTTPRequestHandler):
 
 def setup_https_server():
     # Create a TCP socket server for HTTPS
-    httpd = socketserver.TCPServer(
-        (bind_address, port_http), quietServer)
+    httpd = socketserver.TCPServer((bind_address, port_http), quietServer)
 
     # Wrap the HTTPS server with SSL/TLS context
     httpd.socket = ssl.wrap_socket(
-        httpd.socket, certfile=ssl_certfile, keyfile=ssl_keyfile, server_side=True)
+        httpd.socket, certfile=ssl_certfile, keyfile=ssl_keyfile, server_side=True
+    )
 
     print(f"HTTPS server running at https://{bind_address}:{port_http}/")
 
@@ -161,22 +158,19 @@ def setup_https_server():
 
 
 # yolo settings
-monitor = {'top': 0, 'left': 0, 'width': 640, 'height': 360}
+monitor = {"top": 0, "left": 0, "width": 640, "height": 360}
 pixel_scalar = 2
 crop_square = False
+
+imgSize = 512
 
 
 async def setup_yolo():
     size = pyautogui.size()
-    monitor = {
-        "top": 0,
-        "left": 0,
-        "width": size.width,
-        "height": size.height
-    }
+    monitor = {"top": 0, "left": 0, "width": size.width, "height": size.height}
     if crop_square:
         monitor["width"] = size.height
-        monitor["left"] = math.floor((size.width - size.height)/2)
+        monitor["left"] = math.floor((size.width - size.height) / 2)
     print(monitor)
     model = YOLO("yolov8n.pt")
     with mss() as sct:
@@ -184,30 +178,36 @@ async def setup_yolo():
             while True:
                 screenshot = sct.grab(monitor)
                 img = Image.frombytes(
-                    'RGB', (monitor["width"]*pixel_scalar, monitor["height"]*pixel_scalar), screenshot.rgb)
+                    "RGB",
+                    (monitor["width"] * pixel_scalar, monitor["height"] * pixel_scalar),
+                    screenshot.rgb,
+                )
+                img = img.resize((imgSize, imgSize))
                 screenshot_array = np.array(img)
                 screen = cv2.cvtColor(screenshot_array, cv2.COLOR_RGB2BGR)
                 results = model.track(
-                    screen, stream=True, persist=True, verbose=False, show=True)
+                    screen,
+                    stream=True,
+                    persist=True,
+                    verbose=False,
+                    show=True,
+                    imgsz=imgSize,
+                )
                 box_messages = []
                 for result in results:
                     boxes = result.boxes  # Boxes object for bbox outputs
                     for box in boxes:
                         if box.id is not None:
                             box_message = {
-                                "id": box.id.tolist()[0],
+                                "id": box.id.tolist()[0] if box.id is not None else -1,
                                 "cls": box.cls.tolist()[0],
                                 "conf": box.conf.tolist()[0],
-                                "xywhn": box.xywhn.tolist()[0]
+                                "xywhn": box.xywhn.tolist()[0],
                             }
-                            # print(box_message)
                             box_messages.append(box_message)
 
                 if len(box_messages) > 0:
-                    message = {
-                        "type": "results",
-                        "results": box_messages
-                    }
+                    message = {"type": "results", "results": box_messages}
                     message_json = json.dumps(message)
 
                     websockets_to_remove = set()
@@ -228,12 +228,14 @@ screenshot_loop_interval = 1.0
 
 
 def screenshot_loop():
+    return
     with mss() as sct:
         try:
             while True:
                 if camera_position is not None:
                     closest_screenshot_index = find_closest_screenshot_index(
-                        camera_position, camera_rotation)
+                        camera_position, camera_rotation
+                    )
                     should_add_screenshot = False
                     if closest_screenshot_index == -1:
                         should_add_screenshot = True
@@ -247,13 +249,13 @@ def screenshot_loop():
                         screenshot_positions.append(camera_position.copy())
                         screenshot_rotations.append(camera_rotation.copy())
                         screenshots.append(screenshot)
+                        print(f"new screenshot #{len(screenshots)}")
                 sleep(screenshot_loop_interval)
         except KeyboardInterrupt:
             pass
 
 
 def main():
-
     # Start HTTPS server in a new thread
     https_server_thread = threading.Thread(target=setup_https_server)
     https_server_thread.start()
@@ -265,7 +267,7 @@ def main():
     screenshot_loop_thread = threading.Thread(target=screenshot_loop)
     screenshot_loop_thread.start()
 
-    # asyncio.run(setup_yolo())
+    asyncio.run(setup_yolo())
 
     # Wait for the WebSocket server thread to finish (which will be never unless stopped manually)
     websocket_thread.join()

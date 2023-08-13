@@ -3,7 +3,7 @@
 run to kill process
 
 ```
-sudo kill `sudo lsof -t -i:80`
+sudo kill `sudo lsof -t -i:8080`
 ```
 
 run to setup key:
@@ -21,3 +21,7 @@ openssl x509 -req -days 365 -in certificate.csr -signkey private_key.key -out ce
 ```
 
 and put them in the `/sec` folder
+
+```
+yolo detect predict model=yolov8n.pt source=0 show=true
+```

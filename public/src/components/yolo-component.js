@@ -2,17 +2,20 @@ AFRAME.registerSystem("yolo", {
   schema: {
     port: { type: "string", default: "8443" },
     useTestImage: { type: "boolean", default: true },
-    showIntersections: { type: "boolean", default: true },
-    showBoxes: { type: "boolean", default: true },
+    showIntersections: { type: "boolean", default: false },
+    showBoxes: { type: "boolean", default: false },
     leftThumbstickScalar: { type: "number", default: 0.02 },
     rightThumbstickScalar: { type: "number", default: 0.02 },
-    cameraInterval: { type: "number", default: 100 },
+    cameraInterval: { type: "number", default: 0 },
+    useBox3: { type: "boolean", default: true },
+    showPlanes: { type: "boolean", default: true },
+    showOverlay: { type: "boolean", default: true },
   },
 
   init: function () {
     window.yoloSystem = this;
     this.isOculusBrowser = AFRAME.utils.device.isOculusBrowser();
-    this.showResultsInOverlay = !this.isOculusBrowser;
+    this.showResultsInOverlay = this.data.showOverlay && !this.isOculusBrowser;
     this.entities = [];
 
     this.results = {}; // {id: {cls, clsString, overlayElement, obb, _obb, q, box}}
@@ -83,9 +86,14 @@ AFRAME.registerSystem("yolo", {
     this.boxEntities = new Set();
     this.unusedBoxEntities = new Set();
 
+    this.planeEntities = new Set();
+    this.unusedPlaneEntities = new Set();
+
     // https://github.com/mayognaise/aframe-mouse-cursor-component/blob/master/index.js#L20C3-L21C36
     this.raycaster = new THREE.Raycaster();
     this.camera = document.getElementById("camera");
+    this.cameraPlane = this.camera.querySelector(".intersect");
+    this.cameraPlaneQuaternion = new THREE.Quaternion();
     this.intersectionMarkers = [];
 
     this.classes = {
@@ -349,7 +357,9 @@ AFRAME.registerSystem("yolo", {
     createSocket();
 
     const send = (object) => {
-      socket.send(JSON.stringify(object));
+      if (socket.readyState == WebSocket.OPEN) {
+        socket.send(JSON.stringify(object));
+      }
     };
 
     this.sendWebsocketMessage = send;
@@ -380,6 +390,14 @@ AFRAME.registerSystem("yolo", {
   },
 
   onResults: function (results) {
+    if (!this.camera.hasLoaded) {
+      return;
+    }
+    if (this._isParsingResults) {
+      return;
+    }
+    this._isParsingResults = true;
+
     const windowHeightScalar = window.innerHeight / window.outerHeight;
     if (this.showResultsInOverlay) {
       this.overlayElements.forEach((overlayElement) => {
@@ -391,9 +409,19 @@ AFRAME.registerSystem("yolo", {
         boxEntity._shouldRemove = true;
       });
     }
+    if (this.data.showPlanes) {
+      this.planeEntities.forEach((planeEntity) => {
+        planeEntity._shouldRemove = true;
+      });
+    }
     for (id in this.results) {
       this.results[id]._visible = false;
     }
+
+    if (this.data.showPlanes && results.length > 0) {
+      this.cameraPlane.object3D.getWorldQuaternion(this.cameraPlaneQuaternion);
+    }
+
     results.forEach((_result, index) => {
       const { id, cls, conf, xywhn } = _result;
       const [x, y, width, height] = xywhn;
@@ -405,14 +433,22 @@ AFRAME.registerSystem("yolo", {
           cls,
           clsString,
           visible: true,
+          _visible: true,
           isNew: true,
           obb: null,
           // https://mugen87.github.io/yuka/docs/OBB.html
           _obb: new YUKA.OBB(),
+          box3: new THREE.Box3(),
+          _box3: new THREE.Box3(),
           quaternion: new YUKA.Quaternion(),
           overlayElement: null,
           box: null,
           color: this.randomColor(),
+          center: new THREE.Vector3(),
+          size: new THREE.Vector3(),
+          planeEntity: null,
+          planeCenter: new THREE.Vector3(),
+          planeDimensions: new THREE.Vector3(1, 1, 1),
         };
       }
       const result = this.results[id];
@@ -421,6 +457,40 @@ AFRAME.registerSystem("yolo", {
       const _width = width;
       const _height = height / windowHeightScalar;
       const _y = y * windowHeightScalar;
+
+      if (this.data.showPlanes) {
+        let shouldUpdatePlane = false;
+
+        let planeEntity = result.planeEntity;
+        if (!planeEntity) {
+          planeEntity = this.shiftSet(this.unusedPlaneEntities);
+          if (planeEntity) {
+            console.log("recycling plane", planeEntity);
+            shouldUpdatePlane = true;
+          }
+        }
+        if (!planeEntity) {
+          planeEntity = document.createElement("a-plane");
+          planeEntity.setAttribute("opacity", "0.3");
+          planeEntity.setAttribute("visible", this.data.showPlanes);
+          console.log("created plane", planeEntity);
+          shouldUpdatePlane = true;
+          this.sceneEl.appendChild(planeEntity);
+        }
+        result.planeEntity = planeEntity;
+        result.planeEntity._shouldRemove = false;
+
+        if (shouldUpdatePlane) {
+          this.planeEntities.add(planeEntity);
+
+          planeEntity._id = id;
+          planeEntity.id = `plane-${id}-${clsString}`;
+          console.log("updating plane", planeEntity);
+
+          planeEntity.setAttribute("color", result.color);
+          planeEntity.setAttribute("visible", "true");
+        }
+      }
 
       if (this.data.showBoxes) {
         let shouldUpateBox = false;
@@ -435,10 +505,10 @@ AFRAME.registerSystem("yolo", {
         }
         if (!box) {
           box = document.createElement("a-box");
-          box.setAttribute("color", result.color);
+
           box.setAttribute("scale", "0 0 0");
           box.setAttribute("opacity", "0.2");
-          box.setAttribute("visible", this.data.showBoxes);
+
           //console.log("created box", box);
           shouldUpateBox = true;
           this.sceneEl.appendChild(box);
@@ -451,6 +521,9 @@ AFRAME.registerSystem("yolo", {
 
           box._id = id;
           box.id = `box-${id}-${clsString}`;
+
+          box.setAttribute("color", result.color);
+          box.setAttribute("visible", this.data.showBoxes);
           //console.log("recycled box", box);
         }
       }
@@ -488,9 +561,8 @@ AFRAME.registerSystem("yolo", {
           label = overlayElement.querySelector(".label");
           label.style.color = result.color;
           label.innerText = `${id} ${clsString}`;
+          overlayElement.style.display = "";
         }
-
-        overlayElement.style.display = "";
 
         overlayElement.style.height = `${_height * 100}%`;
         overlayElement.style.width = `${_width * 100}%`;
@@ -507,36 +579,98 @@ AFRAME.registerSystem("yolo", {
         [x - halfWidth, _y + halfHeight],
         [x + halfWidth, _y + halfHeight],
       ];
-      const intersections = corners.map((xy, i) =>
-        this.intersect(...xy, index == 0 ? i : -1)
-      );
-      console.log("intersections", intersections);
 
-      const points = [];
-      intersections.forEach((intersection) => {
-        if (intersection) {
-          points.push(intersection.point);
-        }
-      });
-      points.push(this.camera.object3D.position);
-      if (points.length >= 4) {
-        result._obb.fromPoints(points);
-        if (!result.obb) {
-          result.obb = result._obb.clone();
-        } else {
-          result.obb.intersectsOBB(result._obb);
-        }
-        //console.log("obb", result.obb);
+      if (this.data.showBoxes) {
+        const intersections = corners.map((xy, i) =>
+          this.intersect(...xy, index == 0 ? i : -1)
+        );
+        //console.log("intersections", intersections);
 
-        if (result.box.hasLoaded) {
-          this.updateResultBox(result);
-        } else {
-          result.box.addEventListener("loaded", () =>
-            this.updateResultBox(result)
-          );
+        const points = [];
+        intersections.forEach((intersection) => {
+          if (intersection) {
+            points.push(intersection.point);
+          }
+        });
+        if (points.length >= 4) {
+          points.push(this.camera.object3D.position);
+          if (this.data.useBox3) {
+            if (result.box3.isEmpty()) {
+              result.box3.setFromPoints(points);
+            } else {
+              result._box3.setFromPoints(points);
+              if (result.box3.intersectsBox(result._box3)) {
+                result.box3.intersect(result._box3);
+              } else {
+                result.box3.copy(result._box3);
+              }
+            }
+          } else {
+            result._obb.fromPoints(points);
+            if (!result.obb) {
+              result.obb = result._obb.clone();
+            } else {
+              result.obb.intersectsOBB(result._obb);
+            }
+            //console.log("obb", result.obb);
+          }
+          if (result.box.hasLoaded) {
+            this.updateResultBox(result);
+          } else {
+            result.box.addEventListener("loaded", () =>
+              this.updateResultBox(result)
+            );
+          }
+        }
+      }
+
+      if (this.data.showPlanes && this.cameraPlane?.object3D) {
+        const intersections = corners.map((xy, i) =>
+          this.intersect(...xy, index == 0 ? i : -1, [
+            this.cameraPlane.object3D,
+          ])
+        );
+        //console.log("intersections", intersections);
+
+        const points = [];
+        intersections.forEach((intersection) => {
+          if (intersection) {
+            points.push(intersection.point);
+          }
+        });
+
+        if (points.length == 4) {
+          result.planePoints = points;
+          //console.log(result.id, "planePoints", points);
+          if (result.planeEntity.hasLoaded) {
+            this.updateResultPlane(result);
+          } else {
+            result.planeEntity.addEventListener("loaded", () => {
+              this.updateResultPlane(result);
+            });
+          }
         }
       }
     });
+
+    for (id in this.results) {
+      const result = this.results[id];
+      if (result.isNew) {
+        //console.log(result.id, "new result", result.clsString);
+        delete result.isNew;
+        // new object detected
+      }
+      if (result.visible != result._visible) {
+        result.visible = result._visible;
+        if (!result.visible) {
+          delete result.planeEntity;
+          delete result.boxEntity;
+          delete result.overlayElement;
+        }
+        //console.log(result.id, "changed visibility", result.visible);
+        // object changed visibility
+      }
+    }
 
     if (this.showResultsInOverlay) {
       this.overlayElements.forEach((overlayElement) => {
@@ -553,49 +687,78 @@ AFRAME.registerSystem("yolo", {
         if (boxEntity._shouldRemove) {
           this.boxEntities.delete(boxEntity);
           this.unusedBoxEntities.add(boxEntity);
-          // FIX!!
           boxEntity.setAttribute("visible", "false");
           delete boxEntity._shouldRemove;
         }
       });
     }
 
-    for (id in this.results) {
-      const result = this.results[id];
-      if (result.visible != result._visible) {
-        result.visible = result._visible;
-        // object changed visibility
-      }
-      if (result.isNew) {
-        delete result.isNew;
-        // new object detected
-      }
+    if (this.data.showPlanes) {
+      planeEntities = Array.from(this.planeEntities);
+      planeEntities.forEach((planeEntity) => {
+        if (planeEntity._shouldRemove) {
+          this.planeEntities.delete(planeEntity);
+          this.unusedPlaneEntities.add(planeEntity);
+          planeEntity.setAttribute("visible", "false");
+          console.log("deleting plane", planeEntity);
+          delete planeEntity._shouldRemove;
+        }
+      });
     }
+
+    this._isParsingResults = false;
   },
 
   updateResultBox: function (result) {
-    const { obb, box, quaternion, id } = result;
-    console.log(id, "visible?", box.object3D.visible);
-    quaternion.fromMatrix3(obb.rotation);
-    {
-      // const { x, y, z, w } = quaternion;
-      // box.object3D.quaternion.set(x, y, z, w);
-      // console.log("quaternion", box.object3D.quaternion);
-      const { x, y, z } = quaternion.toEuler({});
-      box.object3D.rotation.set(x, y, z);
-      console.log(id, "euler", box.object3D.rotation);
+    const { obb, box, box3, quaternion, id, center, size } = result;
+    console.log(id, "visible?", result.visible);
+
+    if (this.data.useBox3) {
+      box3.getCenter(center);
+      box3.getSize(size);
+      console.log(id, "center", center);
+      console.log(id, "size", size);
+      box.object3D.position.copy(center);
+      box.object3D.scale.copy(size);
+    } else {
+      quaternion.fromMatrix3(obb.rotation);
+      {
+        // const { x, y, z, w } = quaternion;
+        // box.object3D.quaternion.set(x, y, z, w);
+        // console.log("quaternion", box.object3D.quaternion);
+        const { x, y, z } = quaternion.toEuler({});
+        box.object3D.rotation.set(x, y, z);
+        console.log(id, "euler", box.object3D.rotation);
+      }
+      box.object3D.position.copy(obb.center);
+      console.log(id, "position", box.object3D.position);
+      {
+        const { x, y, z } = obb.halfSizes;
+        box.object3D.scale.set(x * 2, y * 2, z * 2);
+        console.log(id, "scale", box.object3D.scale);
+      }
     }
-    box.object3D.position.copy(obb.center);
-    console.log(id, "position", box.object3D.position);
-    {
-      const { x, y, z } = obb.halfSizes;
-      box.object3D.scale.set(x * 2, y * 2, z * 2);
-      console.log(id, "scale", box.object3D.scale);
-    }
-    // FIX
   },
 
-  intersect: function (x, y, intersectionIndex = -1) {
+  updateResultPlane: function (result) {
+    const { planeEntity, planePoints, planeCenter, planeDimensions } = result;
+    planeCenter.set(0, 0, 0);
+    planePoints.forEach((point) => {
+      planeCenter.add(point);
+    });
+    planeCenter.divideScalar(4);
+    planeCenter.z += Math.random() * 0.001;
+    planeEntity.object3D.position.copy(planeCenter);
+
+    planeDimensions.x = planePoints[0].distanceTo(planePoints[1]);
+    planeDimensions.y = planePoints[0].distanceTo(planePoints[2]);
+
+    planeEntity.object3D.scale.copy(planeDimensions);
+
+    planeEntity.object3D.quaternion.copy(this.cameraPlaneQuaternion);
+  },
+
+  intersect: function (x, y, intersectionIndex = -1, intersectables) {
     x = (x - 0.5) * 2;
     y = 1 - y;
     y = (y - 0.5) * 2;
@@ -609,9 +772,11 @@ AFRAME.registerSystem("yolo", {
       .sub(this.raycaster.ray.origin)
       .normalize();
 
-    const intersectables = Array.from(
-      document.querySelectorAll(".allow-ray")
-    ).map((entity) => entity.object3D);
+    if (!intersectables) {
+      intersectables = Array.from(document.querySelectorAll(".allow-ray")).map(
+        (entity) => entity.object3D
+      );
+    }
 
     const intersectons = this.raycaster.intersectObjects(intersectables);
     const intersecton = intersectons[0];
