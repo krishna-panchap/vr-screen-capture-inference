@@ -267,7 +267,7 @@ def main():
     screenshot_loop_thread = threading.Thread(target=screenshot_loop)
     screenshot_loop_thread.start()
 
-    asyncio.run(setup_yolo())
+    # asyncio.run(setup_yolo())
 
     # Wait for the WebSocket server thread to finish (which will be never unless stopped manually)
     websocket_thread.join()

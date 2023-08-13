@@ -427,6 +427,10 @@ AFRAME.registerSystem("yolo", {
       const [x, y, width, height] = xywhn;
       const clsString = this.classes[cls];
 
+      if (this.isOculusBrowser) {
+        // FILL - clamp to the smaller oculus video
+      }
+
       if (!this.results[id]) {
         this.results[id] = {
           id,
@@ -473,6 +477,13 @@ AFRAME.registerSystem("yolo", {
           planeEntity = document.createElement("a-plane");
           planeEntity.setAttribute("opacity", "0.3");
           planeEntity.setAttribute("visible", this.data.showPlanes);
+
+          const labelEntity = document.createElement("a-text");
+          labelEntity.setAttribute("position", "0 0 0.001");
+          labelEntity.setAttribute("align", "center");
+          labelEntity.setAttribute("width", "4");
+          labelEntity.classList.add("label");
+          planeEntity.appendChild(labelEntity);
           console.log("created plane", planeEntity);
           shouldUpdatePlane = true;
           this.sceneEl.appendChild(planeEntity);
@@ -482,6 +493,9 @@ AFRAME.registerSystem("yolo", {
 
         if (shouldUpdatePlane) {
           this.planeEntities.add(planeEntity);
+
+          const labelEntity = planeEntity.querySelector(".label");
+          labelEntity.setAttribute("value", `${clsString}`);
 
           planeEntity._id = id;
           planeEntity.id = `plane-${id}-${clsString}`;
@@ -740,14 +754,16 @@ AFRAME.registerSystem("yolo", {
     }
   },
 
-  updateResultPlane: function (result) {
+  updateResultPlane: function (result, randomizeZ = true) {
     const { planeEntity, planePoints, planeCenter, planeDimensions } = result;
     planeCenter.set(0, 0, 0);
     planePoints.forEach((point) => {
       planeCenter.add(point);
     });
     planeCenter.divideScalar(4);
-    planeCenter.z += Math.random() * 0.001;
+    if (randomizeZ) {
+      planeCenter.z += Math.random() * 0.0001;
+    }
     planeEntity.object3D.position.copy(planeCenter);
 
     planeDimensions.x = planePoints[0].distanceTo(planePoints[1]);
@@ -799,6 +815,46 @@ AFRAME.registerSystem("yolo", {
         );
       }
       return intersecton;
+    }
+  },
+
+  testIntersection: function (corner, width = 1, height = 1) {
+    const corners = [
+      corner,
+      [corner[0] + width, corner[1]],
+      [corner[0], corner[1] + height],
+      [corner[0] + width, corner[1] + height],
+    ];
+    if (!this.testPlane) {
+      this.testPlane = document.createElement("a-plane");
+      this.testPlane.setAttribute("opacity", "0.3");
+      this.testPlane.setAttribute("color", "red");
+      this.testPlane._options = {
+        planePoints: [],
+        planeCenter: new THREE.Vector3(),
+        planeDimensions: new THREE.Vector3(1, 1, 1),
+      };
+      this.sceneEl.appendChild(this.testPlane);
+    }
+    const intersections = corners.map((xy, i) =>
+      this.intersect(...xy, -1, [this.cameraPlane.object3D])
+    );
+    const points = [];
+    intersections.forEach((intersection) => {
+      if (intersection) {
+        points.push(intersection.point);
+      }
+    });
+
+    if (points.length == 4) {
+      this.testPlane._options.planePoints = points;
+      this.updateResultPlane(
+        {
+          planeEntity: this.testPlane,
+          ...this.testPlane._options,
+        },
+        false
+      );
     }
   },
 
