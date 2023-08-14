@@ -183,6 +183,7 @@ async def setup_yolo():
                     screenshot.rgb,
                 )
                 img = img.resize((imgSize, imgSize))
+                # img = img.rotate(21) # testing adb scrcpy
                 screenshot_array = np.array(img)
                 screen = cv2.cvtColor(screenshot_array, cv2.COLOR_RGB2BGR)
                 results = model.track(
