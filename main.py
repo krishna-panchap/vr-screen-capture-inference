@@ -197,7 +197,7 @@ async def setup_yolo():
                 for result in results:
                     boxes = result.boxes  # Boxes object for bbox outputs
                     for box in boxes:
-                        if box.id is not None:
+                        if False or box.id is not None:
                             box_message = {
                                 "id": box.id.tolist()[0] if box.id is not None else -1,
                                 "cls": box.cls.tolist()[0],
@@ -267,7 +267,7 @@ def main():
     screenshot_loop_thread = threading.Thread(target=screenshot_loop)
     screenshot_loop_thread.start()
 
-    # asyncio.run(setup_yolo())
+    asyncio.run(setup_yolo())
 
     # Wait for the WebSocket server thread to finish (which will be never unless stopped manually)
     websocket_thread.join()

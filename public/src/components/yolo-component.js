@@ -10,6 +10,7 @@ AFRAME.registerSystem("yolo", {
     useBox3: { type: "boolean", default: true },
     showPlanes: { type: "boolean", default: true },
     showOverlay: { type: "boolean", default: true },
+    debugCamera: { type: "boolean", default: true },
   },
 
   init: function () {
@@ -19,6 +20,7 @@ AFRAME.registerSystem("yolo", {
     this.entities = [];
 
     this.results = {}; // {id: {cls, clsString, overlayElement, obb, _obb, q, box}}
+    this._results = []; // detected objects with no id
 
     this.sceneEl.addEventListener("loaded", () => {
       this.imageEntity = document.querySelector(
@@ -261,33 +263,42 @@ AFRAME.registerSystem("yolo", {
     x *= this.data.leftThumbstickScalar;
     y *= this.data.leftThumbstickScalar;
 
-    let didChange = false;
-
-    if (!this.scaleWithLeftThumbstick) {
-      const center = {
-        x: this.imageOptions.center.x - x,
-        y: this.imageOptions.center.y - y,
-      };
-      center.x = THREE.MathUtils.clamp(center.x, 0, 1);
-      center.y = THREE.MathUtils.clamp(center.y, 0, 1);
-      didCenterChange =
-        this.imageOptions.center.x != center.x ||
-        this.imageOptions.center.y != center.y;
-      if (didCenterChange) {
-        this.imageOptions.center = center;
-        didChange = true;
-      }
+    if (this.data.debugCamera && this.oculusBoundingBox) {
+      let { width, height, x: _x, y: _y } = this.oculusBoundingBox;
+      x *= 0.5;
+      y *= 0.5;
+      _x = THREE.MathUtils.clamp(_x + x, 0, 1);
+      _y = THREE.MathUtils.clamp(_y + y, 0, 1);
+      this.updateOculusBoundingBox(width, height, _x, _y);
     } else {
-      let scale = this.imageOptions.scale + y;
-      scale = THREE.MathUtils.clamp(scale, 0.1, 3);
-      didScaleChange = this.imageOptions.scale != scale;
-      if (didScaleChange) {
-        this.imageOptions.scale = scale;
-        didChange = true;
+      let didChange = false;
+
+      if (!this.scaleWithLeftThumbstick) {
+        const center = {
+          x: this.imageOptions.center.x - x,
+          y: this.imageOptions.center.y - y,
+        };
+        center.x = THREE.MathUtils.clamp(center.x, 0, 1);
+        center.y = THREE.MathUtils.clamp(center.y, 0, 1);
+        didCenterChange =
+          this.imageOptions.center.x != center.x ||
+          this.imageOptions.center.y != center.y;
+        if (didCenterChange) {
+          this.imageOptions.center = center;
+          didChange = true;
+        }
+      } else {
+        let scale = this.imageOptions.scale + y;
+        scale = THREE.MathUtils.clamp(scale, 0.1, 3);
+        didScaleChange = this.imageOptions.scale != scale;
+        if (didScaleChange) {
+          this.imageOptions.scale = scale;
+          didChange = true;
+        }
       }
-    }
-    if (didChange) {
-      this.drawImage();
+      if (didChange) {
+        this.drawImage();
+      }
     }
   },
   onRightThumbstickMoved: function (event) {
@@ -295,19 +306,28 @@ AFRAME.registerSystem("yolo", {
     x *= this.data.rightThumbstickScalar;
     y *= this.data.rightThumbstickScalar;
 
-    let distance = this.snapshotOptions.distance - y;
-    distance = THREE.MathUtils.clamp(distance, 0, 10);
-    this.snapshotOptions.distance = distance;
+    if (this.data.debugCamera && this.oculusBoundingBox) {
+      let { width, height, x: _x, y: _y } = this.oculusBoundingBox;
+      x *= 0.5;
+      y *= 0.5;
+      width = THREE.MathUtils.clamp(width + x, 0, 2);
+      height = THREE.MathUtils.clamp(height - y, 0, 2);
+      this.updateOculusBoundingBox(width, height, _x, _y);
+    } else {
+      let distance = this.snapshotOptions.distance - y;
+      distance = THREE.MathUtils.clamp(distance, 0, 10);
+      this.snapshotOptions.distance = distance;
 
-    this.snapshotMarker.object3D.position.z = -distance;
-    this.snapshotMarker.object3D.visible = distance > 0.2;
+      this.snapshotMarker.object3D.position.z = -distance;
+      this.snapshotMarker.object3D.visible = distance > 0.2;
 
-    this.snapshotMarker.object3D.getWorldPosition(
-      this.snapshotOptions.position
-    );
+      this.snapshotMarker.object3D.getWorldPosition(
+        this.snapshotOptions.position
+      );
 
-    console.log(this.snapshotOptions.position);
-    this.requestSnapshot();
+      console.log(this.snapshotOptions.position);
+      this.requestSnapshot();
+    }
   },
   onXButtonDown: function () {
     this.requestSnapshot();
@@ -389,6 +409,26 @@ AFRAME.registerSystem("yolo", {
     return this.colors[Math.floor(Math.random() * this.colors.length)];
   },
 
+  updateOculusBoundingBox: function (
+    width = 0.777,
+    height = 1.19,
+    x = 0.54,
+    y = 0.38
+  ) {
+    const halfWidth = width / 2;
+    const halfHeight = height / 2;
+
+    // the corners of the quest FOV relative to the casted FOV
+    this.oculusBoundingBox = { width, height, x, y };
+    this.oculusBoundingBox.corners = [
+      [x - halfWidth, y - halfHeight],
+      [x + halfWidth, y - halfHeight],
+      [x - halfWidth, y + halfHeight],
+      [x + halfWidth, y + halfHeight],
+    ].map((xy) => new THREE.Vector2(...xy));
+    console.log("oculusBoundingBox", this.oculusBoundingBox);
+  },
+
   onResults: function (results) {
     if (!this.camera.hasLoaded) {
       return;
@@ -417,6 +457,9 @@ AFRAME.registerSystem("yolo", {
     for (id in this.results) {
       this.results[id]._visible = false;
     }
+    this._results.forEach((result) => {
+      result._visible = false;
+    });
 
     if (this.data.showPlanes && results.length > 0) {
       this.cameraPlane.object3D.getWorldQuaternion(this.cameraPlaneQuaternion);
@@ -424,15 +467,29 @@ AFRAME.registerSystem("yolo", {
 
     results.forEach((_result, index) => {
       const { id, cls, conf, xywhn } = _result;
-      const [x, y, width, height] = xywhn;
+      let [x, y, width, height] = xywhn;
       const clsString = this.classes[cls];
 
       if (this.isOculusBrowser) {
-        // FILL - clamp to the smaller oculus video
+        if (!this.oculusBoundingBox) {
+          this.updateOculusBoundingBox();
+        }
+
+        let _x = this.oculusBoundingBox.corners[0].x;
+        _x += this.oculusBoundingBox.width * x;
+        let _y = this.oculusBoundingBox.corners[0].y;
+        _y += this.oculusBoundingBox.height * y;
+
+        x = _x;
+        y = _y;
+
+        width *= this.oculusBoundingBox.width;
+        height *= this.oculusBoundingBox.height;
       }
 
-      if (!this.results[id]) {
-        this.results[id] = {
+      let result;
+      if (id == -1 || !this.results[id]) {
+        result = {
           id,
           cls,
           clsString,
@@ -442,9 +499,9 @@ AFRAME.registerSystem("yolo", {
           obb: null,
           // https://mugen87.github.io/yuka/docs/OBB.html
           _obb: new YUKA.OBB(),
+          quaternion: new YUKA.Quaternion(),
           box3: new THREE.Box3(),
           _box3: new THREE.Box3(),
-          quaternion: new YUKA.Quaternion(),
           overlayElement: null,
           box: null,
           color: this.randomColor(),
@@ -454,8 +511,14 @@ AFRAME.registerSystem("yolo", {
           planeCenter: new THREE.Vector3(),
           planeDimensions: new THREE.Vector3(1, 1, 1),
         };
+        if (id == -1) {
+          this._results.push(result);
+        } else {
+          this.results[id] = result;
+        }
+      } else {
+        result = this.results[id];
       }
-      const result = this.results[id];
       result._visible = true;
 
       const _width = width;
@@ -469,22 +532,24 @@ AFRAME.registerSystem("yolo", {
         if (!planeEntity) {
           planeEntity = this.shiftSet(this.unusedPlaneEntities);
           if (planeEntity) {
-            console.log("recycling plane", planeEntity);
+            //console.log("recycling plane", planeEntity);
             shouldUpdatePlane = true;
           }
         }
         if (!planeEntity) {
           planeEntity = document.createElement("a-plane");
-          planeEntity.setAttribute("opacity", "0.3");
+          planeEntity.setAttribute("opacity", "0.4");
           planeEntity.setAttribute("visible", this.data.showPlanes);
 
           const labelEntity = document.createElement("a-text");
-          labelEntity.setAttribute("position", "0 0 0.001");
+          labelEntity.setAttribute("position", "0 0 0.01");
           labelEntity.setAttribute("align", "center");
           labelEntity.setAttribute("width", "4");
+          labelEntity.setAttribute("opacity", "1");
+          //labelEntity.setAttribute("color", "black");
           labelEntity.classList.add("label");
           planeEntity.appendChild(labelEntity);
-          console.log("created plane", planeEntity);
+          //console.log("created plane", planeEntity);
           shouldUpdatePlane = true;
           this.sceneEl.appendChild(planeEntity);
         }
@@ -499,7 +564,7 @@ AFRAME.registerSystem("yolo", {
 
           planeEntity._id = id;
           planeEntity.id = `plane-${id}-${clsString}`;
-          console.log("updating plane", planeEntity);
+          //console.log("updating plane", planeEntity);
 
           planeEntity.setAttribute("color", result.color);
           planeEntity.setAttribute("visible", "true");
@@ -686,6 +751,13 @@ AFRAME.registerSystem("yolo", {
       }
     }
 
+    this._results.filter((result) => {
+      if (result.visible != result._visible) {
+        result.visible = result._visible;
+      }
+      return result.visible;
+    });
+
     if (this.showResultsInOverlay) {
       this.overlayElements.forEach((overlayElement) => {
         if (overlayElement._shouldRemove) {
@@ -714,7 +786,7 @@ AFRAME.registerSystem("yolo", {
           this.planeEntities.delete(planeEntity);
           this.unusedPlaneEntities.add(planeEntity);
           planeEntity.setAttribute("visible", "false");
-          console.log("deleting plane", planeEntity);
+          //console.log("deleting plane", planeEntity);
           delete planeEntity._shouldRemove;
         }
       });
