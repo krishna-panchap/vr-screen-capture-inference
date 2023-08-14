@@ -162,7 +162,7 @@ monitor = {"top": 0, "left": 0, "width": 640, "height": 360}
 pixel_scalar = 2
 crop_square = False
 
-imgSize = 512
+imgSize = 320
 
 
 async def setup_yolo():
@@ -172,7 +172,7 @@ async def setup_yolo():
         monitor["width"] = size.height
         monitor["left"] = math.floor((size.width - size.height) / 2)
     print(monitor)
-    model = YOLO("yolov8n.pt")
+    model = YOLO("yolov8m.pt")
     with mss() as sct:
         try:
             while True:
