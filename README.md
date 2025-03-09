@@ -21,3 +21,16 @@ openssl x509 -req -days 365 -in certificate.csr -signkey private_key.key -out ce
 ```
 
 and put them in the `/sec` folder
+
+
+# Inference
+install ollama, openai - may need to run a more quantized model
+
+# dependencies installation 
+`python -m venv venv`
+`source venv/bin/activate`
+`pip install -r requirements.txt`
+
+# run
+`python main.py`
+

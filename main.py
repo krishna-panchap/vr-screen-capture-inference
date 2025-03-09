@@ -16,8 +16,22 @@ from PIL import Image
 import pyautogui
 import math
 
+## inference
+import ollama
+import base64
+import json
+import cv2
+from io import BytesIO
+from openai import OpenAI
+
+
 # I used ChatGPT for the web server stuff :)
 project_directory = os.path.dirname(os.path.abspath(__file__))
+
+client = OpenAI(
+    base_url='http://localhost:11434/v1',
+    api_key='ollama'  # required, but not used
+)
 
 
 def get_path(subpath):
@@ -93,26 +107,61 @@ def find_closest_screenshot_index(position: [float], rotation: [float]) -> int:
                 closest_screenshot_index = index
     return closest_screenshot_index
 
+def crop_detected_object(image, xyxy_box):
+    x1, y1, x2, y2 = map(int, xyxy_box)
+    return image[y1:y2, x1:x2]
 
-async def websocket_handler(websocket_client):
-    if websocket_client not in websocket_clients:
-        print("new websocket client")
-        websocket_clients.add(websocket_client)
-    async for message in websocket_client:
-        message_object: dict = json.loads(message)
-        # print(f"Received message: {message_object}")
-        message_type = message_object.get("type", "")
-        match message_type:
-            case "camera":
-                camera_position = message_object["position"]
-                camera_rotation = message_object["rotation"]
-                print(f"rotation: {camera_rotation}")
-                print(f"position: {camera_position}")
-            case "screenshot":
-                # find picture that is closest to the current position/rotation
-                pass
-            case _:
-                print(f'uncaught message type "{message_type}"')
+def run_llava_inference_from_crop(cropped_image):
+    print("running llava inference")
+    # Convert OpenCV image to PNG and encode as base64
+    _, buffer = cv2.imencode('.png', cropped_image)
+    image_bytes = buffer.tobytes()
+    image_b64 = base64.b64encode(image_bytes).decode('utf-8')
+
+    # Vision prompt
+    prompt = (
+        "Describe this object in three parts:\n"
+        "1. What is the object?\n"
+        "2. What could it be used for?\n"
+        "3. What is its typical price range?\n"
+        "ONLY RESPOND in JSON with keys: object_name, object_usage, object_pred_price (number only). If you are unsure about the object name, respond with 'Unknown' for all fields or take your best guess\n"
+        "Be as specific as possible with the object name and usage. If you know the brand (macbook, iphone, etc), include it in the object name.\n"
+        "Example: {\"object_name\": \"Unknown\", \"object_usage\": \"Unknown\", \"object_pred_price\": \"Unknown\"} or {\"object_name\": \"Laptop\", \"object_usage\": \"Computing-related tasks\", \"object_pred_price\": \"500-2000\"}"
+    )
+
+    # Send the image and prompt to LLaVA
+    response = client.chat.completions.create(
+        model="llava:34b",
+        messages=[
+            {"role": "system", "content": "You are a helpful assistant."},
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_b64}"}}
+                ]
+            }
+        ]
+    )
+
+    reply_text = response.choices[0].message.content.strip()
+
+    # Try to parse the reply as JSON
+    try:
+        json_start = reply_text.find("{")
+        json_end = reply_text.rfind("}") + 1
+        json_response = reply_text[json_start:json_end]
+        parsed_result = json.loads(json_response)
+    except Exception as e:
+        parsed_result = {
+            "object_name": "Unknown",
+            "object_usage": "Could not parse response",
+            "object_pred_price": "N/A"
+        }
+        print(f"[WARN] Failed to parse JSON from LLaVA: {e}")
+        print(f"[LLaVA Raw Output]: {reply_text}")
+    print(f"[LLaVA Parsed Result]: {parsed_result}")
+    return parsed_result
 
 
 async def start_websocket_server():
@@ -196,16 +245,26 @@ async def setup_yolo():
                 )
                 box_messages = []
                 for result in results:
-                    boxes = result.boxes  # Boxes object for bbox outputs
+                    # annotated_frame = result.orig_img.copy()
+                    # annotated_frame = result.orig_img.copy()
+                    boxes = result.boxes
+
                     for box in boxes:
-                        if False or box.id is not None:
-                            box_message = {
+                        x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
+                        cropped = annotated_frame[y1:y2, x1:x2]
+
+                        # Run LLaVA
+                        object_info = run_llava_inference_from_crop(cropped)
+
+                        box_message = {
                                 "id": box.id.tolist()[0] if box.id is not None else -1,
                                 "cls": box.cls.tolist()[0],
                                 "conf": box.conf.tolist()[0],
                                 "xywhn": box.xywhn.tolist()[0],
-                            }
-                            box_messages.append(box_message)
+                                "object_info": object_info
+                        }
+                        box_messages.append(box_message)
+                        print(f"[BOX MESSAGE]: {box_message}")
 
                 if len(box_messages) > 0:
                     message = {"type": "results", "results": box_messages}
@@ -254,7 +313,6 @@ def screenshot_loop():
                 sleep(screenshot_loop_interval)
         except KeyboardInterrupt:
             pass
-
 
 def main():
     # Start HTTPS server in a new thread
